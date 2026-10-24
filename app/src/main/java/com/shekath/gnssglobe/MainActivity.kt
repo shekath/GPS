@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var pages: List<View>
     private lateinit var tabs: List<TextView>
     private lateinit var permissionPanel: View
+    private lateinit var demoChip: TextView
 
     private var selectedKey: Int? = null
     private var running = false
@@ -49,16 +50,20 @@ class MainActivity : Activity() {
         setContentView(buildUi())
         orbits.load { engine.requestCompute() }
         selectTab(savedInstanceState?.getInt("tab") ?: 0)
+        if (savedInstanceState?.getBoolean("demo") == true) setDemo(true)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("tab", pages.indexOfFirst { it.visibility == View.VISIBLE }.coerceAtLeast(0))
+        outState.putBoolean("demo", engine.demo)
     }
 
     override fun onResume() {
         super.onResume()
-        if (hasPermission()) startTracking() else {
+        if (hasPermission()) startTracking()
+        else if (engine.demo) startEngine()
+        else {
             permissionPanel.visibility = View.VISIBLE
             if (!askedPermission) { askedPermission = true; askPermission() }
         }
@@ -83,7 +88,23 @@ class MainActivity : Activity() {
 
     private fun startTracking() {
         permissionPanel.visibility = View.GONE
+        running = false  // restart so the receiver is registered now that permission exists
+        startEngine()
+    }
+
+    private fun startEngine() {
         if (!running) { engine.start(); running = true }
+    }
+
+    private fun setDemo(on: Boolean) {
+        engine.setDemo(on)
+        styleChip(demoChip, on)
+        if (on) {
+            permissionPanel.visibility = View.GONE
+            startEngine()
+        } else if (!hasPermission()) {
+            permissionPanel.visibility = View.VISIBLE
+        }
     }
 
     // ------------------------------------------------------------------ render
@@ -96,6 +117,7 @@ class MainActivity : Activity() {
 
         val loc = s.location
         val (chipText, chipColor) = when {
+            s.demo -> "DEMO" to 0xFFC084FC.toInt()
             !engine.isGpsEnabled -> "GPS OFF" to 0xFFF87171.toInt()
             loc != null && loc.provider == "gps" && s.usedCount >= 4 ->
                 (if (loc.hasAltitude()) "3D FIX" else "2D FIX") to 0xFF4ADE80.toInt()
@@ -157,7 +179,10 @@ class MainActivity : Activity() {
             setPadding(px(10), px(3), px(10), px(3))
             background = GradientDrawable().apply { cornerRadius = 50f * dp; setColor(0x22000000) }
             setOnClickListener {
-                if (!engine.isGpsEnabled) startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                when {
+                    engine.demo -> setDemo(false)
+                    !engine.isGpsEnabled -> startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                }
             }
         }
         titleRow.addView(statusChip)
@@ -242,6 +267,8 @@ class MainActivity : Activity() {
         chip("SIGNALS", true) { globe.showRays = !globe.showRays; styleChip(it, globe.showRays) }
         chip("ALL GNSS", true) { globe.showCatalog = !globe.showCatalog; styleChip(it, globe.showCatalog) }
         chip("SPIN", true) { globe.autoRotate = !globe.autoRotate; styleChip(it, globe.autoRotate) }
+        chip("DEMO", false) { setDemo(!engine.demo) }
+        demoChip = col.getChildAt(col.childCount - 1) as TextView
         return col
     }
 
@@ -285,11 +312,25 @@ class MainActivity : Activity() {
             textSize = 14f
             typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
             setPadding(px(24), px(12), px(24), px(12))
+            gravity = Gravity.CENTER
             background = GradientDrawable().apply { cornerRadius = 50f * dp; setColor(0xFF38BDF8.toInt()) }
             setOnClickListener { askPermission() }
-        })
+        }, LinearLayout.LayoutParams(px(220), -2))
         box.addView(TextView(this).apply {
-            text = "If the prompt no longer appears, enable it in App settings."
+            text = "TRY DEMO MODE"
+            setTextColor(0xFFC084FC.toInt())
+            textSize = 14f
+            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+            setPadding(px(24), px(12), px(24), px(12))
+            background = GradientDrawable().apply {
+                cornerRadius = 50f * dp; setStroke(px(1), 0xFFC084FC.toInt())
+            }
+            gravity = Gravity.CENTER
+            setOnClickListener { setDemo(true) }
+        }, LinearLayout.LayoutParams(px(220), -2).apply { topMargin = px(12) })
+        box.addView(TextView(this).apply {
+            text = "Demo mode simulates satellites, no GPS or permission needed.\n" +
+                "If the permission prompt no longer appears, enable it in App settings."
             setTextColor(0x80FFFFFF.toInt())
             textSize = 12f
             gravity = Gravity.CENTER

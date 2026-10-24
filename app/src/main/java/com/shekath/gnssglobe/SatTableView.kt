@@ -51,7 +51,8 @@ class SatTableView(context: Context) : View(context) {
         val snap = snapshot ?: return
         val pad = 16 * dp
         bold.textSize = 18f * dp; bold.color = Color.WHITE; bold.textAlign = Paint.Align.LEFT
-        canvas.drawText("${snap.sats.size} satellites tracked · ${snap.usedCount} used in fix", pad, 28 * dp, bold)
+        canvas.drawText("${snap.sats.size} satellites ${if (snap.demo) "simulated" else "tracked"} · ${snap.usedCount} used in fix",
+            pad, 28 * dp, bold)
         text.textSize = 12f * dp; text.color = 0x99FFFFFF.toInt(); text.textAlign = Paint.Align.LEFT
         canvas.drawText("Distance from your phone to each satellite, with its error margin. Tap to view on the globe.",
             pad, 48 * dp, text)

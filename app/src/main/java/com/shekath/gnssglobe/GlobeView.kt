@@ -96,6 +96,7 @@ class GlobeView(context: Context) : View(context) {
     private val bold = Paint(text).apply { typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD) }
     private val timeFmt = SimpleDateFormat("HH:mm:ss 'UTC'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
     private var cardRect = RectF()
+    private val demoRect = RectF()
 
     // ------------------------------------------------------------------ input
 
@@ -521,13 +522,28 @@ class GlobeView(context: Context) : View(context) {
         text.color = 0xB3FFFFFF.toInt()
         canvas.drawText(timeFmt.format(Date(snap.timeMs)), width - pad, pad + 12 * dp, text)
         val orbitsLine = when (snap.orbitState) {
-            OrbitRepository.State.READY -> "${snap.orbitCount} orbits · SGP4"
+            OrbitRepository.State.READY ->
+                if (snap.syntheticOrbits) "${snap.orbitCount} synthetic orbits" else "${snap.orbitCount} orbits · SGP4"
             OrbitRepository.State.LOADING -> "loading orbits…"
             OrbitRepository.State.OFFLINE -> "orbits offline · shell model"
             OrbitRepository.State.IDLE -> ""
         }
         canvas.drawText(orbitsLine, width - pad, pad + 30 * dp, text)
         text.textAlign = Paint.Align.LEFT
+        if (snap.demo) {
+            val label = "DEMO · SIMULATED SATELLITES"
+            bold.textSize = 11f * dp; bold.textAlign = Paint.Align.RIGHT
+            val w = bold.measureText(label)
+            val top = pad + 40 * dp
+            demoRect.set(width - pad - w - 20 * dp, top, width - pad, top + 22 * dp)
+            fill.color = 0x33C084FC
+            canvas.drawRoundRect(demoRect, 11 * dp, 11 * dp, fill)
+            stroke.color = 0xFFC084FC.toInt(); stroke.strokeWidth = 1f * dp
+            canvas.drawRoundRect(demoRect, 11 * dp, 11 * dp, stroke)
+            bold.color = 0xFFE9D5FF.toInt()
+            canvas.drawText(label, width - pad - 10 * dp, top + 15 * dp, bold)
+            bold.textAlign = Paint.Align.LEFT
+        }
         if (snap.location == null) drawCentered(canvas, "Waiting for a location fix…")
     }
 

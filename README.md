@@ -15,6 +15,19 @@ outdoors with a clear view of the sky.
 
 *(Screenshots rendered from the real app with simulated satellite input.)*
 
+## Demo mode (indoor testing)
+
+Tap **DEMO** on the globe, or **TRY DEMO MODE** on the permission screen. Demo mode works
+without GPS and without location permission. It shows the sky as a receiver would see it:
+satellites above your horizon with realistic signal strengths, a fix from the strongest
+16–18, and positions that wander a few metres like real fixes. It uses real orbits when
+they are cached, otherwise a built-in synthetic GPS/Galileo/GLONASS/BeiDou/QZSS
+constellation. It's placed at your last known position, or at Greenwich if the phone has
+never had a fix. Everything is clearly marked **DEMO · SIMULATED SATELLITES**. Tap the
+DEMO chip again to return to the real receiver; simulated and real fixes are never mixed.
+
+<img src="docs/demo_globe.png" width="240">
+
 ## Screens
 
 - **Globe** – a dot-matrix Earth with day/night shading and a pulsing marker at your location.

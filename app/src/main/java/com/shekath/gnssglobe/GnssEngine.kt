@@ -1,7 +1,9 @@
 package com.shekath.gnssglobe
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.GnssClock
 import android.location.GnssMeasurement
 import android.location.GnssMeasurementsEvent
@@ -70,13 +72,17 @@ data class Snapshot(
     val ttffMs: Int?,
     val orbitState: OrbitRepository.State,
     val orbitCount: Int,
-    val fixStats: FixStats.Summary?
+    val fixStats: FixStats.Summary?,
+    /** True when the satellites and position are simulated (demo mode). */
+    val demo: Boolean = false,
+    /** Demo mode is using the built-in synthetic constellation instead of real orbits. */
+    val syntheticOrbits: Boolean = false
 ) {
     val usedCount get() = sats.count { it.used }
 }
 
 /** Collects GNSS status, raw measurements and fixes, and turns them into a [Snapshot]. */
-class GnssEngine(context: Context, private val orbits: OrbitRepository) {
+class GnssEngine(private val context: Context, private val orbits: OrbitRepository) {
 
     var listener: ((Snapshot) -> Unit)? = null
     var latest: Snapshot? = null; private set
@@ -95,6 +101,12 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
     private var rawSats: Map<Int, RawSat> = emptyMap()
     private val measured = HashMap<Int, Measured>()
     private var location: Location? = null
+    private var sensorsOn = false
+    private val demoSky = DemoSky()
+
+    /** Simulated satellites and position instead of the phone's receiver. */
+    var demo = false
+        private set
     private var rawSupported: Boolean? = null
     private var ttffMs: Int? = null
     private val matches = HashMap<Int, Int>() // satellite key → NORAD id
@@ -104,6 +116,7 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
     private val statusCallback = object : GnssStatus.Callback() {
         override fun onFirstFix(ttffMillis: Int) { ttffMs = ttffMillis }
         override fun onSatelliteStatusChanged(status: GnssStatus) {
+            if (demo) return
             val map = HashMap<Int, RawSat>()
             for (i in 0 until status.satelliteCount) {
                 val c = Constellation.fromId(status.getConstellationType(i))
@@ -133,6 +146,7 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
     private val measurementCallback = object : GnssMeasurementsEvent.Callback() {
         override fun onGnssMeasurementsReceived(event: GnssMeasurementsEvent) {
             rawSupported = true
+            if (demo) return
             val now = System.currentTimeMillis()
             for (m in event.measurements) {
                 val key = m.constellationType * 1000 + m.svid
@@ -160,7 +174,7 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
             ) {
                 location = loc
             }
-            if (loc.provider == LocationManager.GPS_PROVIDER) {
+            if (loc.provider == LocationManager.GPS_PROVIDER && !demo) {
                 fixStats.add(FixStats.Sample(loc.latitude, loc.longitude, loc.accuracy, loc.time))
             }
             requestCompute()
@@ -174,8 +188,31 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
 
     val isGpsEnabled get() = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
 
-    @SuppressLint("MissingPermission")
+    fun setDemo(on: Boolean) {
+        if (on == demo) return
+        demo = on
+        // Never mix simulated and real data.
+        fixStats.clear()
+        matches.clear()
+        measured.clear()
+        rawSats = emptyMap()
+        compute()
+    }
+
+    private fun hasPermission() =
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** Starts the update loop, and the receiver too when location permission is granted. */
     fun start() {
+        if (hasPermission()) startSensors()
+        main.removeCallbacks(ticker)
+        ticker.run()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startSensors() {
+        if (sensorsOn) return
+        sensorsOn = true
         val looper = Looper.getMainLooper()
         lm.registerGnssStatusCallback(statusCallback, main)
         lm.registerGnssMeasurementsCallback(measurementCallback, main)
@@ -193,11 +230,12 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
                 .maxByOrNull { it.time }
             if (last != null) location = last
         }
-        ticker.run()
     }
 
     fun stop() {
         main.removeCallbacks(ticker)
+        if (!sensorsOn) return
+        sensorsOn = false
         lm.unregisterGnssStatusCallback(statusCallback)
         lm.unregisterGnssMeasurementsCallback(measurementCallback)
         lm.removeUpdates(locationListener)
@@ -224,20 +262,38 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
     private fun compute() {
         lastComputeMs = SystemClock.uptimeMillis()
         val now = System.currentTimeMillis()
-        val loc = location
+        val catalogOrbits: List<OrbitElements>
+        val raw: Map<Int, RawSat>
+        val loc: Location?
+        if (demo) {
+            catalogOrbits = demoSky.catalog(orbits.orbits, now)
+            // Simulate at the phone's real position when known, so the sky matches reality.
+            val base = location
+            loc = demoSky.location(
+                base?.latitude ?: DemoSky.DEFAULT_LAT, base?.longitude ?: DemoSky.DEFAULT_LON,
+                if (base != null && base.hasAltitude()) base.altitude else DemoSky.DEFAULT_ALT_M, now
+            )
+            fixStats.add(FixStats.Sample(loc.latitude, loc.longitude, loc.accuracy, now))
+            raw = demoSky.satellites(catalogOrbits, loc, now).associate {
+                it.c.id * 1000 + it.svid to RawSat(it.c, it.svid, it.az, it.el, it.cn0, it.used, true, 1575.42)
+            }
+        } else {
+            catalogOrbits = orbits.orbits
+            raw = rawSats
+            loc = location
+        }
         val user = loc?.let {
             Geo.geodeticToEcef(it.latitude, it.longitude, if (it.hasAltitude()) it.altitude / 1000.0 else 0.0)
         }
 
         // Propagate every published GNSS orbit to "now".
-        val catalogOrbits = orbits.orbits
         val catalogPos = catalogOrbits.map { it.ecef(now) }
         val catalogAzEl = if (user != null && loc != null) catalogPos.map { Geo.azEl(loc.latitude, loc.longitude, user, it) } else null
         val byNorad = HashMap<Int, Int>().apply { catalogOrbits.forEachIndexed { i, o -> put(o.noradId, i) } }
         val matchedIdx = HashSet<Int>()
 
-        val views = ArrayList<SatView>(rawSats.size)
-        for ((key, s) in rawSats) {
+        val views = ArrayList<SatView>(raw.size)
+        for ((key, s) in raw) {
             val meas = measured[key]?.takeIf { now - it.atMs < 3000 }
             var ecef: Vec3? = null
             var range: Double? = null
@@ -317,8 +373,10 @@ class GnssEngine(context: Context, private val orbits: OrbitRepository) {
         val snap = Snapshot(
             timeMs = now, location = loc, userEcef = user, sats = views, dop = dop,
             predictedH1Sigma = predH, predictedV1Sigma = predV, catalog = catalog,
-            rawMeasurements = rawSupported, ttffMs = ttffMs, orbitState = orbits.state,
-            orbitCount = catalogOrbits.size, fixStats = fixStats.summary()
+            rawMeasurements = if (demo) null else rawSupported, ttffMs = if (demo) null else ttffMs,
+            orbitState = if (demo && catalogOrbits.isNotEmpty()) OrbitRepository.State.READY else orbits.state,
+            orbitCount = catalogOrbits.size, fixStats = fixStats.summary(),
+            demo = demo, syntheticOrbits = demo && orbits.orbits.isEmpty()
         )
         latest = snap
         listener?.invoke(snap)
