@@ -15,6 +15,18 @@ outdoors with a clear view of the sky.
 
 *(Screenshots rendered from the real app with simulated satellite input.)*
 
+## Web app
+
+The same globe runs in any browser: **https://shekath.github.io/GPS/** (deployed from `web/`
+by GitHub Actions). It downloads live GNSS orbits from CelesTrak, propagates them with the
+same SGP4/SDP4 code (ported to JavaScript and tested against the reference implementation),
+and places you with the browser's location. Browsers can't read the phone's GNSS chip, so the
+web app predicts which satellites a receiver would track and use. The Android app shows the
+ones your phone actually uses. Without location access or orbit data, it simulates the sky
+from a place you pick and labels it **Simulated**.
+
+To run it locally: `cd web && python3 -m http.server`, then open http://localhost:8000.
+
 ## Demo mode (indoor testing)
 
 Tap **DEMO** on the globe, or **TRY DEMO MODE** on the permission screen. Demo mode works

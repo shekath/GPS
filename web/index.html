@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GNSS Globe</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Live 3-D globe of the GPS, Galileo, GLONASS and BeiDou satellites above you, with distances, error margins and ground accuracy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-height instrument console. Globe stage fills the left; a tabbed readout panel
+   docks on the right (stacked behind a bottom tab bar on phones). Single dark look by design. */
+:root {
+  --space: #05070d;
+  --panel: #0b1220;
+  --panel-2: #111b2e;
+  --line: #1c2840;
+  --text: #e6edf7;
+  --muted: #8a97ae;
+  --accent: #38bdf8;
+  --demo: #c084fc;
+  --good: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --f-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --f-body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--space); color: var(--text); font: 15px/1.45 var(--f-body);
+  display: grid; grid-template-rows: auto 1fr auto; overflow: hidden;
+}
+button, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- header */
+.top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--space);
+}
+.brand { font: 700 22px/1 var(--f-display); letter-spacing: 0.2em; margin: 0; white-space: nowrap; }
+.status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; flex: 1; }
+.chip {
+  font: 600 12px/1 var(--f-display); letter-spacing: 0.1em; text-transform: uppercase;
+  border: 1.5px solid currentColor; border-radius: 999px; padding: 5px 10px; white-space: nowrap;
+}
+.chip.good { color: var(--good); } .chip.warn { color: var(--warn); } .chip.demo { color: var(--demo); }
+.chip.info { color: var(--accent); }
+.where { font: 13px/1.3 var(--f-data); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.loc-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px;
+  cursor: pointer; font: 600 13px/1 var(--f-display); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.on { border-color: var(--accent); background: #0e3b5c; }
+select.btn { text-transform: none; letter-spacing: 0; font: 500 13px/1 var(--f-body); }
+
+/* ---------- main */
+main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; min-height: 0; }
+.stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+#globe { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#globe:active { cursor: grabbing; }
+.legend {
+  position: absolute; top: 14px; left: max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 4px;
+  font: 600 14px/1.2 var(--f-display); letter-spacing: 0.04em; pointer-events: none;
+}
+.legend div { display: grid; grid-template-columns: 12px 72px auto; align-items: center; gap: 8px; }
+.legend i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.legend span:last-child { font: 12px var(--f-data); color: var(--muted); }
+.clock {
+  position: absolute; top: 14px; right: 16px; text-align: right; font: 12px/1.6 var(--f-data);
+  color: var(--muted); pointer-events: none;
+}
+.controls { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); display: grid; gap: 8px; }
+.controls .btn { width: 76px; padding: 9px 4px; background: rgba(17, 27, 46, 0.85); }
+.banner {
+  position: absolute; top: 64px; right: 16px; color: var(--demo); border: 1px solid var(--demo);
+  background: rgba(192, 132, 252, 0.12); border-radius: 999px; padding: 4px 12px;
+  font: 600 12px var(--f-display); letter-spacing: 0.12em;
+}
+.card {
+  position: absolute; left: 14px; bottom: 14px; width: min(420px, calc(100% - 120px));
+  background: rgba(11, 18, 32, 0.94); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+}
+.card h3 { margin: 0 0 8px; font: 700 20px/1.1 var(--f-display); letter-spacing: 0.04em; display: flex; gap: 10px; align-items: center; }
+.card h3 i { width: 12px; height: 12px; border-radius: 50%; }
+.card h3 small { font: 500 13px var(--f-body); color: var(--muted); letter-spacing: 0; }
+.kv { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 3px 12px; font-size: 13.5px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--f-data); font-size: 12.5px; overflow-wrap: anywhere; }
+.card .close { position: absolute; top: 10px; right: 10px; background: none; border: 0; color: var(--muted); font-size: 20px; cursor: pointer; }
+
+/* ---------- side panel */
+.panel { display: grid; grid-template-rows: auto 1fr; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tabs button {
+  flex: 1; background: none; border: 0; padding: 12px 4px; cursor: pointer; color: var(--muted);
+  font: 600 13px var(--f-display); letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 2px solid transparent;
+}
+.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.views { overflow: auto; min-height: 0; }
+.view { padding: 16px; display: grid; gap: 14px; align-content: start; }
+.view h2 { margin: 0; font: 700 18px/1.2 var(--f-display); letter-spacing: 0.04em; text-wrap: balance; }
+.note { color: var(--muted); font-size: 12.5px; margin: 0; max-width: 60ch; }
+canvas.plot { width: 100%; aspect-ratio: 1; max-width: 100%; display: block; }
+
+.sat-list { display: grid; gap: 6px; }
+.sat {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 2px 12px; align-items: center;
+  background: var(--panel-2); border: 1px solid transparent; border-radius: 12px; padding: 10px 12px;
+  cursor: pointer; text-align: left; width: 100%;
+}
+.sat:hover, .sat.sel { border-color: var(--accent); }
+.badge { grid-row: span 2; font: 700 15px/1 var(--f-display); border-radius: 7px; padding: 6px 0; text-align: center; color: var(--space); }
+.badge.unused { background: transparent !important; border: 1.5px solid currentColor; }
+.sat .name { font: 600 15px var(--f-display); letter-spacing: 0.04em; }
+.sat .meta { font: 11.5px var(--f-data); color: var(--muted); grid-column: 2; }
+.sat .range { font: 600 16px var(--f-data); text-align: right; font-variant-numeric: tabular-nums; }
+.sat .err { font: 11.5px var(--f-data); color: var(--good); text-align: right; }
+
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tile { background: var(--panel-2); border-radius: 12px; padding: 10px 12px; border-left: 3px solid var(--c, var(--accent)); }
+.tile span { display: block; color: var(--muted); font-size: 11.5px; }
+.tile b { font: 700 22px/1.2 var(--f-display); font-variant-numeric: tabular-nums; }
+.rows { display: grid; gap: 4px; font-size: 14px; }
+.rows div { display: flex; justify-content: space-between; gap: 12px; }
+.rows b { font: 500 13px var(--f-data); font-variant-numeric: tabular-nums; }
+.bar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 56px; gap: 8px; align-items: center; font: 12px var(--f-data); }
+.bar i { display: block; height: 10px; border-radius: 4px; }
+.bar span:last-child { text-align: right; }
+.link-btn { color: var(--accent); background: none; border: 0; cursor: pointer; font: 600 13px var(--f-display); letter-spacing: 0.12em; padding: 0; }
+.head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.about p { margin: 0; max-width: 62ch; }
+.about a { color: var(--accent); }
+
+/* ---------- bottom tab bar (phones) */
+.tabbar { display: none; }
+@media (max-width: 860px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  .panel { border-left: 0; grid-template-rows: 1fr; }
+  .panel .tabs { display: none; }
+  body[data-tab="globe"] .panel { display: none; }
+  body:not([data-tab="globe"]) .stage { display: none; }
+  .tabbar {
+    display: flex; background: var(--panel); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+  }
+  .tabbar button {
+    flex: 1; background: none; border: 0; color: var(--muted); padding: 12px 2px; cursor: pointer;
+    font: 600 12px var(--f-display); letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .tabbar button[aria-selected="true"] { color: var(--accent); }
+  .controls {
+    top: auto; transform: none; bottom: 10px; left: max(10px, env(safe-area-inset-left, 0px)); right: 10px;
+    display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none;
+  }
+  .controls .btn { width: auto; flex: none; padding: 8px 10px; font-size: 11px; }
+  .card { width: auto; left: 10px; right: 10px; bottom: 56px; max-height: 55%; overflow: auto; }
+  .banner { display: none; }
+  .legend { font-size: 12px; }
+  .legend div { grid-template-columns: 10px 58px auto; }
+  .where { flex-basis: 100%; order: 3; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body data-tab="globe">
+<header class="top">
+  <h1 class="brand">GNSS GLOBE</h1>
+  <div class="status">
+    <span class="chip warn" id="loc-chip">Locating…</span>
+    <span class="chip warn" id="orbit-chip">Loading orbits…</span>
+  </div>
+  <div class="loc-controls">
+    <button class="btn" id="use-location" type="button">Use my location</button>
+    <select class="btn" id="place" aria-label="Simulate from a place"></select>
+  </div>
+  <div class="where" id="where">—</div>
+</header>
+
+<main>
+  <section class="stage" aria-label="Globe">
+    <canvas id="globe" aria-label="3-D globe of satellites around your position"></canvas>
+    <div class="legend" id="legend"></div>
+    <div class="clock" id="clock"></div>
+    <div class="banner" id="banner" hidden>SIMULATED SKY</div>
+    <div class="controls">
+      <button class="btn" type="button" id="btn-me">◎ Me</button>
+      <button class="btn" type="button" id="btn-in" aria-label="Zoom in">＋</button>
+      <button class="btn" type="button" id="btn-out" aria-label="Zoom out">－</button>
+      <button class="btn on" type="button" id="btn-orbits" aria-pressed="true">Orbits</button>
+      <button class="btn on" type="button" id="btn-rays" aria-pressed="true">Signals</button>
+      <button class="btn on" type="button" id="btn-all" aria-pressed="true">All GNSS</button>
+      <button class="btn on" type="button" id="btn-spin" aria-pressed="true">Spin</button>
+    </div>
+    <div class="card" id="card" hidden></div>
+  </section>
+
+  <aside class="panel">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="sky" type="button">Sky</button>
+      <button role="tab" data-tab="sats" type="button">Satellites</button>
+      <button role="tab" data-tab="acc" type="button">Accuracy</button>
+      <button role="tab" data-tab="about" type="button">About</button>
+    </div>
+    <div class="views">
+      <section class="view" data-view="sky">
+        <h2>Your sky</h2>
+        <canvas class="plot" id="sky"></canvas>
+        <p class="note">Azimuth/elevation of every satellite above the horizon. Filled = predicted to be used in the fix. Size and bars = modelled signal strength (C/N₀, dB-Hz).</p>
+        <div id="signal-bars" class="sat-list"></div>
+      </section>
+      <section class="view" data-view="sats">
+        <div class="head-row"><h2 id="sats-title">Satellites</h2></div>
+        <p class="note">Distance from you to each satellite, with its error margin. Select one to show it on the globe.</p>
+        <div class="sat-list" id="sat-list"></div>
+      </section>
+      <section class="view" data-view="acc">
+        <h2>Position error on the ground</h2>
+        <div class="tiles" id="acc-tiles"></div>
+        <p class="note" id="acc-note"></p>
+        <h2>Predicted from satellite geometry</h2>
+        <div class="rows" id="dop-rows"></div>
+        <p class="note">Position error ≈ DOP × range error. Low DOP means the satellites are spread across the sky.</p>
+        <div class="head-row"><h2>Measured scatter of fixes</h2><button class="link-btn" id="reset" type="button">RESET</button></div>
+        <canvas class="plot" id="scatter"></canvas>
+        <div class="rows" id="scatter-rows"></div>
+        <h2>Ground error caused by each satellite</h2>
+        <div class="sat-list" id="contrib"></div>
+        <h2>Range error budget</h2>
+        <div class="rows" id="budget"></div>
+      </section>
+      <section class="view about" data-view="about">
+        <h2>How it works</h2>
+        <p>The globe shows the navigation satellites above your position. Their orbits come from
+          <a href="https://celestrak.org/" target="_blank" rel="noopener">CelesTrak</a> and are propagated with
+          SGP4/SDP4, the standard model for these element sets. The distance to each satellite is
+          accurate to about ±3 km plus 2 km per day of element age.</p>
+        <p>Browsers cannot read a phone's GNSS chip. The satellites a receiver would track and use are
+          predicted from their orbits, using the strongest signals at least 10° above the horizon. To see
+          the satellites your phone actually uses, with raw signal travel times, install the Android app.</p>
+        <p>The ground error combines three views. <b>Reported</b> is your browser's accuracy figure.
+          <b>Predicted</b> is the fix geometry (DOP) times a single-frequency error budget. <b>Measured</b> is
+          the scatter of your recent fixes, which is meaningful while you stand still.</p>
+        <p>Without location access, or when orbit data can't be downloaded, the page simulates the sky
+          from a place you pick and labels it <b>Simulated</b>.</p>
+        <p><a href="https://github.com/shekath/GPS" target="_blank" rel="noopener">Source and Android app on GitHub</a></p>
+      </section>
+    </div>
+  </aside>
+</main>
+
+<nav class="tabbar" role="tablist">
+  <button role="tab" data-tab="globe" type="button">Globe</button>
+  <button role="tab" data-tab="sky" type="button">Sky</button>
+  <button role="tab" data-tab="sats" type="button">Satellites</button>
+  <button role="tab" data-tab="acc" type="button">Accuracy</button>
+</nav>
+
+<script src="sgp4.js"></script>
+<script src="core.js"></script>
+<script src="landmask.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
